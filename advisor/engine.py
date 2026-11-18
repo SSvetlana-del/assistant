@@ -2,6 +2,8 @@
 import json
 import logging
 import os
+import ssl
+from pathlib import Path
 from typing import Literal, TypedDict
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
@@ -9,6 +11,22 @@ from langchain_gigachat import GigaChat
 from langgraph.graph import StateGraph, START, END
 
 log = logging.getLogger(__name__)
+
+
+def failure_reason(exc):
+    """Log only error categories; never credentials, URLs, bodies or prompts."""
+    chain, seen = [], set()
+    current = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    if any('CERTIFICATE_VERIFY_FAILED' in str(e) for e in chain):
+        return 'TLS_CERTIFICATE_VERIFY_FAILED'
+    status = getattr(exc, 'status_code', None)
+    if isinstance(status, int):
+        return f'HTTP_{status}'
+    return ' -> '.join(type(e).__name__ for e in chain)
 
 
 class Route(BaseModel):
@@ -50,6 +68,10 @@ class Advisor:
                           temperature=0.2, timeout=40, max_tokens=1200, verify_ssl_certs=True)
             if os.getenv('GIGACHAT_CA_BUNDLE'):
                 kwargs['ca_bundle_file'] = os.environ['GIGACHAT_CA_BUNDLE']
+            else:
+                context = ssl.create_default_context()
+                context.load_verify_locations(cafile=str(Path(__file__).parents[1] / 'certs/russian_trusted_root_ca.pem'))
+                kwargs['ssl_context'] = context
             self.model = GigaChat(**kwargs)
         return self.model
 
@@ -73,7 +95,7 @@ class Advisor:
             ids = [cid for cid in result.course_ids if cid in self.courses]
             return {'route': result.intent, 'course_ids': ids or state.get('course_ids', []), 'error': False}
         except Exception as exc:
-            log.warning('Classification failed: %s', type(exc).__name__)
+            log.warning('Classification failed: %s', failure_reason(exc))
             return {'error': True, 'route': 'general'}
 
     def price(self, state):
@@ -99,7 +121,7 @@ class Advisor:
                 raise ValueError('empty_response')
             return {'answer': response.content}
         except Exception as exc:
-            log.warning('Generation failed: %s', type(exc).__name__)
+            log.warning('Generation failed: %s', failure_reason(exc))
             return self.error(state)
 
     def selection(self, state):

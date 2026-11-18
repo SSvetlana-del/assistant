@@ -31,7 +31,7 @@ def session_id(value):
 
 def restore(value):
     sid = session_id(value)
-    return sid, sid, store.load(sid)['history']
+    return sid, sid, store.load(sid)['history'], gr.update(interactive=True), gr.update(interactive=True)
 
 
 def send(text, sid):
@@ -129,9 +129,9 @@ def build_app():
             with gr.Column(scale=3):
                 chat = gr.Chatbot(height=500, label='Консультант', buttons=['copy'],
                                   placeholder='Расскажите, чему хотите научиться и какой у вас опыт.')
-                message = gr.Textbox(label='Ваш вопрос', placeholder='Хочу перейти из маркетинга в продуктовую аналитику. С чего начать?', max_lines=5)
+                message = gr.Textbox(label='Ваш вопрос', placeholder='Хочу перейти из маркетинга в продуктовую аналитику. С чего начать?', max_lines=5, interactive=False)
                 with gr.Row():
-                    submit = gr.Button('Отправить', variant='primary')
+                    submit = gr.Button('Отправить', variant='primary', interactive=False)
                     clear = gr.Button('Новый диалог')
                 gr.Examples(examples=[['Подбери курс по бизнес-аналитике для новичка'],
                                       ['Есть ли продвинутые курсы для дизайнеров?'],
@@ -152,7 +152,7 @@ def build_app():
             gr.Markdown(catalog_markdown())
         if not os.getenv('GIGACHAT_CREDENTIALS'):
             gr.Markdown('⚙️ GigaChat ещё не подключён: добавьте ключ в `.env` на сервере. Каталог и запись уже работают.')
-        demo.load(restore, [browser], [browser, sid, chat], api_name=False)
+        demo.load(restore, [browser], [browser, sid, chat, message, submit], api_name=False)
         # One shared queue prevents races between chat and enrollment callbacks.
         queue = dict(concurrency_id='advisor', concurrency_limit=1, api_name=False)
         submit.click(send, [message, sid], [message, chat], **queue)

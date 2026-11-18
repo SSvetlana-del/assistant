@@ -143,3 +143,17 @@ def test_real_provider_accepts_route_schema_without_network():
     from langchain_gigachat import GigaChat
     model = GigaChat(credentials='dummy-test-key', base_url='https://api.giga.chat/v1')
     assert model.with_structured_output(Route) is not None
+
+
+def test_gigachat_trust_context_preserves_verification(monkeypatch):
+    import ssl
+    monkeypatch.setenv('GIGACHAT_CREDENTIALS','dummy-test-key')
+    monkeypatch.delenv('GIGACHAT_CA_BUNDLE',raising=False)
+    model = Advisor(CATALOG).llm()
+    assert model.ssl_context.verify_mode == ssl.CERT_REQUIRED
+    assert model.ssl_context.check_hostname is True
+
+
+def test_error_categories_do_not_leak_secrets():
+    from advisor.engine import failure_reason
+    assert failure_reason(RuntimeError('SECRET_VALUE')) == 'RuntimeError'
