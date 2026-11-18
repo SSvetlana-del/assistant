@@ -60,6 +60,11 @@ class Store:
                        (token, sid, json.dumps(payload, ensure_ascii=False), datetime.now(timezone.utc).isoformat()))
         return token
 
+    def cancel_draft(self, sid):
+        with self.connect() as db:
+            self.lock_write(db, sid)
+            self.query(db, 'DELETE FROM drafts WHERE session_id=?', (sid,))
+
     def confirm(self, sid, token):
         with self.connect() as db:
             self.lock_write(db, sid)

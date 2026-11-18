@@ -208,7 +208,7 @@ def test_receipt_includes_dates_and_load_without_source():
     from app import readable, catalog_markdown
     fields=readable(payload())
     assert fields['Начало обучения']=='07 декабря 2026 года'
-    assert fields['Примерная нагрузка']=='4–6 часов в неделю'
+    assert 'Желаемая нагрузка' not in fields and 'Примерная нагрузка' not in fields
     assert 'Источник' not in fields
     cards=catalog_markdown()
     assert 'http' not in cards and '4000 ₽' in cards

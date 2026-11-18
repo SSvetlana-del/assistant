@@ -67,3 +67,26 @@ def test_rls_enabled_and_schema_not_public(pg):
     with pg.connect() as db:
         rows=db.execute("SELECT c.relname, c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='it_advisor' AND c.relkind='r'").fetchall()
     assert len(rows)==3 and all(r['relrowsecurity'] for r in rows)
+
+
+def test_conversational_booking_is_persistent_and_confirmed(pg):
+    from advisor.booking import ChatService
+    from test_booking import AdvisorStub
+    sid=secrets.token_hex(16)
+    service=ChatService(AdvisorStub(),pg)
+    service.turn(sid,'Хочу записаться на SQL')
+    service.turn(sid,'1')
+    preview=service.turn(sid,'Анна')
+    assert preview['booking']['stage']=='confirm'
+    with pg.connect() as db:
+        assert db.execute('SELECT count(*) AS n FROM enrollments WHERE session_id=%s',(sid,)).fetchone()['n']==0
+    reopened=ChatService(AdvisorStub(),PostgresStore(os.environ['TEST_POSTGRES_URL']))
+    result=reopened.turn(sid,'Подтверждаю')
+    assert result['last_receipt']['name']=='Анна'
+    assert result['last_receipt']['start_date']=='2026-12-01'
+    assert 'preferred_load' not in result['last_receipt']
+    other=secrets.token_hex(16)
+    service.turn(other,'Хочу записаться на SQL');service.turn(other,'1');service.turn(other,'Анна')
+    service.turn(other,'Отмена')
+    with pg.connect() as db:
+        assert db.execute('SELECT count(*) AS n FROM drafts WHERE session_id=%s',(other,)).fetchone()['n']==0
