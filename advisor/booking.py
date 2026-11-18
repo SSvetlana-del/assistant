@@ -79,6 +79,7 @@ class ChatService:
         value=re.sub(r'^(меня зовут|моё имя|мое имя|имя|я)\s*[:—-]?\s*','',text.strip(),flags=re.I).strip()
         if not 2<=len(value)<=80 or not re.fullmatch(r"[^\W\d_]+(?:[ '\-][^\W\d_]+){0,4}",value,re.UNICODE):
             return None
+        if normalize(value) in CONFIRM or normalize(value) in CANCEL:return None
         words=normalize(value).split()
         blocked={'да','нет','подтверждаю','запиши','записаться','отмена','привет','хочу','хорошо','ок','изменить','курс','когда','сколько','как','почему','пожалуйста','что','где','можно','спасибо','подойдет','подойдёт','сейчас','завтра'}
         return None if any(w in blocked for w in words) else value
@@ -155,7 +156,7 @@ class ChatService:
             self.cancel_draft(sid);state={}
             answer='Хорошо, запись не оформляем. Могу помочь подобрать другую программу — какое направление вам интересно?'
         elif state:
-            if value in CONFIRM and state['stage']=='confirm':
+            if value in CONFIRM and state['stage']=='confirm' and not question_like:
                 try:
                     record,created=self.store.confirm(sid,state['token'])
                 except ValueError:

@@ -67,12 +67,29 @@ def restore(value):
     return (sid,sid,*view(store.load(sid)),*[gr.update(interactive=True) for _ in range(5)])
 
 
-def send(text,sid):
+def answer(text,sid):
     if not sid:raise gr.Error('Чат загружается, подождите секунду.')
     text=(text or '').strip()
     if len(text)>4000:raise gr.Error('Сократите сообщение до 4000 символов.')
     saved=service.turn(sid,text) if text else store.load(sid)
-    return ('',*view(saved))
+    return view(saved)
+
+
+def capture(text,history):
+    visible=list(history or []) + ([{'role':'user','content':text}] if (text or '').strip() else [])
+    return (text,visible,gr.update(value='',interactive=False),*[gr.update(interactive=False) for _ in range(8)])
+
+
+def enable_controls():
+    return [gr.update(interactive=True) for _ in range(9)]
+
+
+BUSY_JS = """(...args) => {
+ const input=document.querySelector('#message-input textarea');
+ if(input)input.disabled=true;
+ document.querySelectorAll('#send-button, #suggestions button, #confirm-actions button, #reset-button').forEach(b=>b.disabled=true);
+ return args;
+}"""
 
 
 def reset():
@@ -114,6 +131,7 @@ def build_app():
     with gr.Blocks(title='IT Навигатор · Ваш следующий шаг в IT',analytics_enabled=False) as demo:
         browser=gr.BrowserState(None,storage_key='it-advisor-session-v1',secret=os.getenv('BROWSER_SECRET') or SECRET_FILE.read_text())
         sid=gr.State('')
+        pending=gr.State('')
         gr.HTML('<header class="brand-nav"><div class="brand"><span class="brand-mark">✦</span>IT Навигатор</div><div class="nav-links"><span>Обучение, которое подходит вам</span><span class="nav-label">ОНЛАЙН-ПЛАТФОРМА</span></div></header>')
         gr.HTML('<section class="hero"><div><div class="eyebrow">ЗНАНИЯ ДЛЯ НОВОГО ЭТАПА</div><h1>Ваш следующий шаг в IT.<br><span>Давайте найдём его вместе.</span></h1><p>Расскажите о своих планах. Навигатор поможет выбрать программу,<br>разобраться в условиях и записаться на удобный старт.</p></div><div class="hero-note"><strong>17 программ</strong>от первого знакомства до уверенного роста</div></section>')
         with gr.Row(elem_id='workspace'):
@@ -147,12 +165,18 @@ def build_app():
         gr.HTML('<footer class="page-footer"><span>© 2026 IT Навигатор · Вместе к новым возможностям</span><span>'+html.escape(CATALOG['notice'])+'</span></footer>')
         queue=dict(concurrency_id='advisor',concurrency_limit=1,api_name=False)
         demo.load(restore,[browser],[browser,sid,chat,receipt,confirm_row,progress,message,submit,pick,compare,book],api_name=False)
-        outputs=[message,chat,receipt,confirm_row,progress]
-        submit.click(send,[message,sid],outputs,**queue)
-        message.submit(send,[message,sid],outputs,**queue)
+        controls=[message,submit,pick,compare,book,confirm_btn,change_btn,cancel_btn,clear]
+        def wire(component,text=None,enter=False):
+            fn=capture if text is None else lambda history,text=text:capture(text,history)
+            event=(component.submit if enter else component.click)(fn,[message,chat] if text is None else [chat],
+                      [pending,chat]+controls,queue=False,api_name=False,js=BUSY_JS)
+            result=event.success(answer,[pending,sid],[chat,receipt,confirm_row,progress],**queue)
+            result.then(enable_controls,[],controls,queue=False,api_name=False)
+        wire(submit)
+        wire(message,enter=True)
         for button,text in [(pick,'Помогите подобрать курс'),(compare,'Хочу сравнить программы'),(book,'Хочу записаться'),
                             (confirm_btn,'Подтверждаю запись'),(change_btn,'Изменить данные'),(cancel_btn,'Отмена')]:
-            button.click(lambda session,text=text:send(text,session),[sid],outputs,**queue)
+            wire(button,text)
         clear.click(reset,[],[browser,sid,chat,receipt,confirm_row,progress,message],**queue)
         for field in (direction,level,availability):
             field.input(catalog_cards,[direction,level,availability],[cards],api_name=False)

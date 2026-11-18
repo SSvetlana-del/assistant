@@ -152,3 +152,15 @@ def test_unknown_course_does_not_reuse_previous_course(service):
     service.store.save('one',{'history':[],'course_ids':['sql']})
     state=service.turn('one','Хочу записаться на кибербезопасность')
     assert state['booking']['stage']=='course' and not state['booking'].get('course_id')
+
+
+def test_question_is_not_explicit_confirmation(service):
+    prepare(service)
+    state=service.turn('one','Подтверждаю?')
+    assert state['booking']['stage']=='confirm' and count(service)==0
+
+
+def test_confirmation_phrase_is_not_a_name(service):
+    service.turn('one','Хочу записаться на SQL');service.turn('one','1')
+    state=service.turn('one','всё верно')
+    assert state['booking']['stage']=='name' and not state['booking'].get('name')
