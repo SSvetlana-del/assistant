@@ -112,6 +112,11 @@ def catalog_cards(direction='Все направления',level='Любой у
         starts=start_date_text(dates(c)[0]).replace(' года','')
         cards.append(f'<article class="course-card"><div class="course-tags"><span class="course-tag{pro}">{e(c["level"])}</span></div>'
                      f'<h3>{e(c["title"])}</h3><div class="course-meta">{e(c["duration"])} · {e(c["weekly_load"])}<br>Ближайший старт: {e(starts)} · ещё 2 даты</div>'
+                     f'<p class="course-description">{e(c["description"])}</p>'
+                     f'<details class="course-details"><summary>Программа и результат</summary><p>{e(c["audience"])}</p>'
+                     + '<ul>'+''.join('<li>'+e(t)+'</li>' for t in c['syllabus'])+'</ul>'
+                     + f'<p><strong>Практика:</strong> {e(c["final_project"])}</p><p><strong>Результат:</strong> {e("; ".join(c["outcomes"]))}</p>'
+                     f'<p><strong>Входные знания:</strong> {e(c["prerequisites"])}</p><p>{e(c["limitations"])}</p></details>'
                      f'<div class="course-footer"><span class="course-price">{price_text(c["price_rub"])}</span>'
                      f'<span class="course-start">за весь курс</span></div></article>')
     empty='<p class="catalog-count">Не нашли подходящую программу? Расскажите о ваших планах в чате.</p>'

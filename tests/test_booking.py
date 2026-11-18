@@ -175,7 +175,10 @@ def test_ambiguous_date_and_wrong_two_digit_year_require_clarification(service):
 
 def test_new_booking_after_previous_confirmation_can_start(service):
     prepare(service);service.turn('one','Подтверждаю')
-    service.turn('one','Сколько стоит другой курс?')
+    saved=service.store.load('one')
+    saved['course_ids']=['qa']
+    saved['history'].append({'role':'assistant','content':'Базовый курс тестирования — 14000 ₽. Хотите записаться?'})
+    service.store.save('one',saved)
     class EnrollAfterYes(AdvisorStub):
         def reply(self,text,saved):
             result=super().reply(text,saved)

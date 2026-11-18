@@ -2,6 +2,7 @@
 import re
 from datetime import date
 from advisor.catalog import start_date_text, price_text, MONTHS
+from advisor.guidance import (explicit_enrollment, enrollment_consent, is_payment, is_program, mentioned_courses)
 
 CONFIRM = {'подтверждаю','подтверждаю запись','подтвердить запись','да','да подтверждаю','всё верно','все верно'}
 CANCEL = {'отмена','отменить','отменить запись','не хочу записываться','передумал','передумала'}
@@ -131,12 +132,12 @@ class ChatService:
             if ('продвин' in normalize(text) or 'мидл' in normalize(text)) and self.courses[cid]['level']!='Продвинутый':return None
             return cid
         value=normalize(text)
-        generic={'хочу записаться','записаться','запиши меня','оформить запись','хочу оформить запись','помоги записаться'}
+        generic={'запишите','запиши','запишите меня','запиши меня пожалуйста','хочу записаться','записаться','запиши меня','оформить запись','хочу оформить запись','помоги записаться'}
         ids=saved.get('course_ids',[])
-        if value in generic and len(ids)==1:return ids[0]
+        if normalize(re.split(r'[,;]|\s+а\s+',text,flags=re.I)[0]) in generic and len(ids)==1:return ids[0]
         classify=getattr(self.advisor,'classify',None)
         if classify:
-            result=classify({'history':saved.get('history',[])+[{'role':'user','content':text}],'course_ids':[]})
+            result=classify({'history':[{'role':'user','content':text}],'course_ids':[]})
             ids=result.get('course_ids',[])
             if not result.get('error') and len(ids)==1:
                 if ('продвин' in value or 'мидл' in value) and self.courses[ids[0]]['level']!='Продвинутый':return None
@@ -160,10 +161,33 @@ class ChatService:
         state=dict(saved.get('booking') or {})
         history=saved.get('history',[])
         record=None
-        question_like = '?' in text or bool(re.match(r'^(сколько|как|какая|какой|когда|где|можно|расскажи|подскажи|что)\b', value))
+        question_like = ('?' in text or is_payment(text) or is_program(text)
+                         or bool(re.match(r'^(?:а )?(сколько|как|какая|какой|когда|где|можно|расскажи|подскажи|что)\b', value)))
+        explicit=explicit_enrollment(text)
+        consent=enrollment_consent(text,history)
+        # Repair obsolete unfinished re-bookings of an already confirmed course.
+        receipt=saved.get('last_receipt') or {}
+        if state.get('course_id') and state.get('course_id')==receipt.get('course_id') and not state.get('token'):
+            self.cancel_draft(sid);state={}
+        if state and explicit:
+            new_ids=mentioned_courses(text,self.courses)
+            if len(new_ids)==1 and new_ids[0]!=state.get('course_id'):
+                self.cancel_draft(sid)
+                state=self.seed(text,new_ids)
+                state['stage']='date' if not state.get('start_date') else 'name'
+
         if value in CANCEL or re.fullmatch(r'(?:я )?(?:хочу )?(?:отменить|отмена|передумал|передумала)(?: запись)?', value):
             self.cancel_draft(sid);state={}
             answer=('Незавершённой заявки сейчас нет. Уже подтверждённая запись сохранена. Есть вопросы по обучению?' if saved.get('last_receipt') and not saved.get('booking') else 'Хорошо, эту заявку не оформляем. Могу помочь подобрать другую программу — какое направление вам интересно?')
+        elif state and question_like and not explicit and value not in CONFIRM:
+            new_ids=mentioned_courses(text,self.courses)
+            if new_ids and state.get('course_id') not in new_ids:
+                # A clear course switch abandons only the unconfirmed draft.
+                self.cancel_draft(sid);state={}
+            context=dict(saved,course_ids=new_ids or ([state['course_id']] if state.get('course_id') else saved.get('course_ids',[])))
+            reply=self.advisor.reply(text,context)
+            saved['course_ids']=reply.get('course_ids',[])
+            answer=reply['history'][-1]['content']
         elif state:
             if value in CONFIRM and state['stage']=='confirm' and not question_like:
                 try:
@@ -203,16 +227,10 @@ class ChatService:
                 else:answer='Укажите, пожалуйста, имя, например «Анна» или «Меня зовут Анна». '+self.prompt(state)
             else:
                 answer='Для сохранения нужно явное подтверждение. '+self.prompt(state)
-            # Questions during booking should not be mistaken for a name or confirmation.
-            if state and question_like and record is None and value not in CONFIRM:
-                context=dict(saved,course_ids=[state['course_id']] if state.get('course_id') else [])
-                reply=self.advisor.reply(text,context)
-                answer=reply['history'][-1]['content']+'\n\n'+self.prompt(state)
         elif value in (CONFIRM-{'да','всё верно','все верно'}) and saved.get('confirmation_echo_pending') and saved.get('last_receipt'):
             answer='Эта запись уже сохранена — повторно оформлять её не нужно. Хотите выбрать другой курс?'
         else:
             saved['confirmation_echo_pending']=False
-            explicit=bool(re.search(r'запис|оформить',value)) and not bool(re.search(r'как.*запис',value))
             if explicit:
                 resolved=self.resolve_course(text,saved)
                 ids=[resolved] if resolved else []
@@ -221,11 +239,14 @@ class ChatService:
             else:
                 reply=self.advisor.reply(text,saved)
                 saved['course_ids']=reply.get('course_ids',[])
-                if reply.get('route')=='enroll':
+                if reply.get('route')=='enroll' and consent:
                     ids=reply.get('course_ids',[])
                     state=self.seed(text,ids)
                     answer=self.advance(sid,state)
                 else:answer=reply['history'][-1]['content']
+        if explicit and is_payment(text):
+            policy=getattr(self.advisor,'catalog',{}).get('payment_policy','В этом учебном проекте оплата не взимается; оплачивать запись не нужно.')
+            answer=policy+'\n\n'+answer
         saved['booking']=state
         if state.get('course_id'):saved['course_ids']=[state['course_id']]
         saved['history']=history+[{'role':'user','content':text},{'role':'assistant','content':answer}]

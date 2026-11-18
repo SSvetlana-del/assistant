@@ -111,7 +111,11 @@ def test_generation_receives_history_and_catalog(intent):
     result = Advisor(CATALOG, model).reply('Хочу развиваться', previous)
     assert len(result['history']) == 4
     assert any('опыт 3 года' in m.content for m in model.calls[-1])
-    assert 'UX-исследования' in model.calls[-1][0].content
+    if intent=='general':
+        assert 'Дизайнер интерфейсов' in model.calls[-1][0].content
+        assert 'Юнит-экономика' not in model.calls[-1][0].content
+    else:
+        assert result['course_ids']==['design-pro','ux']
 
 
 def test_follow_up_price_retains_course():
@@ -124,7 +128,7 @@ def test_enrollment_intent_cannot_write_database():
     model = FakeModel('enroll',['design'])
     result = Advisor(CATALOG, model).reply('Запиши меня', {})
     assert 'подтвердите' in result['history'][-1]['content']
-    assert len(model.calls) == 1
+    assert not model.calls  # Explicit write intent is recognized without a model.
 
 
 def test_provider_failure_is_safe():

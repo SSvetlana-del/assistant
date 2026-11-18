@@ -119,3 +119,10 @@ footer {display:none!important;}
  #conversation .prose{font-size:13px!important;}
 }
 #catalog-panel .form {background:transparent!important;border:0!important;box-shadow:none!important;gap:10px!important;}
+
+.course-description { font-size:12px; line-height:1.65; color:var(--muted, #78839e); margin:10px 0; }
+.course-details { font-size:12px; line-height:1.65; margin:12px 0; color:#57637f; }
+.course-details summary { cursor:pointer; color:#594eff; font-weight:600; }
+.course-details p { margin:9px 0; }
+.course-details ul { padding-left:18px; }
+.course-details li { margin:7px 0; }
