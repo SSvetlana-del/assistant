@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import ssl
+from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Literal, TypedDict
 from pydantic import BaseModel, Field
@@ -25,7 +26,8 @@ def failure_reason(exc):
         return 'TLS_CERTIFICATE_VERIFY_FAILED'
     status = getattr(exc, 'status_code', None)
     if isinstance(status, int):
-        return f'HTTP_{status}'
+        url = urlsplit(str(getattr(exc, 'url', '')))
+        return f'HTTP_{status} {url.hostname or "unknown"}{url.path}'
     return ' -> '.join(type(e).__name__ for e in chain)
 
 
@@ -62,7 +64,7 @@ class Advisor:
             if not os.getenv('GIGACHAT_CREDENTIALS'):
                 raise RuntimeError('missing_credentials')
             kwargs = dict(credentials=os.environ['GIGACHAT_CREDENTIALS'],
-                          base_url=os.getenv('GIGACHAT_BASE_URL', 'https://api.giga.chat/v1'),
+                          base_url=getattr(self, '_compat_base_url', None) or os.getenv('GIGACHAT_BASE_URL', 'https://api.giga.chat/v1'),
                           scope=os.getenv('GIGACHAT_SCOPE', 'GIGACHAT_API_PERS'),
                           model=os.getenv('GIGACHAT_MODEL', 'GigaChat'),
                           temperature=0.2, timeout=40, max_tokens=1200, verify_ssl_certs=True)
@@ -96,6 +98,13 @@ class Advisor:
             return {'route': result.intent, 'course_ids': ids or state.get('course_ids', []), 'error': False}
         except Exception as exc:
             log.warning('Classification failed: %s', failure_reason(exc))
+            if (getattr(exc, 'status_code', None) == 404
+                    and urlsplit(str(getattr(exc, 'url', ''))).hostname == 'api.giga.chat'
+                    and not getattr(self, '_compat_base_url', None)):
+                log.warning('Retrying GigaChat via legacy compatible API endpoint')
+                self._compat_base_url = 'https://gigachat.devices.sberbank.ru/api/v1'
+                self.model = None
+                return self.classify(state)
             return {'error': True, 'route': 'general'}
 
     def price(self, state):

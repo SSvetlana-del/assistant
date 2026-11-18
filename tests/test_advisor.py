@@ -157,3 +157,20 @@ def test_gigachat_trust_context_preserves_verification(monkeypatch):
 def test_error_categories_do_not_leak_secrets():
     from advisor.engine import failure_reason
     assert failure_reason(RuntimeError('SECRET_VALUE')) == 'RuntimeError'
+
+
+def test_new_endpoint_404_retries_legacy_once(monkeypatch):
+    from gigachat.exceptions import ResponseError
+    advisor = Advisor(CATALOG)
+    class Broken:
+        def with_structured_output(self, schema):
+            raise ResponseError('https://api.giga.chat/v1/chat/completions',404,b'',{})
+    calls=[]
+    def model():
+        calls.append(1)
+        return Broken() if len(calls)==1 else FakeModel('price',['qa-plus'])
+    monkeypatch.setattr(advisor,'llm',model)
+    result=advisor.reply('Цена?',{})
+    assert '5 900' in result['history'][-1]['content']
+    assert advisor._compat_base_url=='https://gigachat.devices.sberbank.ru/api/v1'
+    assert len(calls)==2
