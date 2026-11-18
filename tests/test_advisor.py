@@ -34,8 +34,8 @@ def store(tmp_path):
 
 def payload(course='qa'):
     return {'course_id': course, 'name': 'Тест', 'course': 'Курс', 'price_rub': 0,
-            'duration':'50 часов','format':'Онлайн','preferred_load':'4–5 часов в неделю',
-            'scope':'Учебная запись','source':'https://stepik.org'}
+            'duration':'8 недель','format':'Онлайн','preferred_load':'4–5 часов в неделю',
+            'weekly_load':'4–6 часов в неделю','start_date':'2026-12-07','scope':'Учебная запись'}
 
 
 def test_history_persists_and_is_isolated(store):
@@ -82,14 +82,25 @@ def test_price_is_not_generated_by_llm():
     model = FakeModel('price', ['qa-plus'])
     result = Advisor(CATALOG, model).reply('Сколько стоит?', {})
     answer = result['history'][-1]['content']
-    assert '5 900 ₽' in answer and '245575' in answer
+    course = next(c for c in CATALOG['courses'] if c['id']=='qa-plus')
+    assert f"{course['price_rub']} ₽" in answer
+    assert '2026 года' in answer and 'Хотите записаться?' in answer
+    assert 'http' not in answer and 'Источник' not in answer
     assert len(model.calls) == 1
 
 
-def test_unknown_price_is_not_zero():
-    result = Advisor(CATALOG, FakeModel('price', ['design'])).reply('Цена?', {})
-    assert 'цена не подтверждена' in result['history'][-1]['content']
-    assert 'бесплатно' not in result['history'][-1]['content']
+def test_price_without_course_asks_instead_of_listing_catalog():
+    result = Advisor(CATALOG, FakeModel('price')).reply('Сколько стоит?', {})
+    answer = result['history'][-1]['content']
+    assert 'Какой курс' in answer and '?' in answer
+    assert '₽' not in answer
+
+
+def test_sql_price_matches_support_example():
+    result = Advisor(CATALOG, FakeModel('price', ['sql'])).reply('Сколько стоит?', {})
+    answer = result['history'][-1]['content']
+    assert answer.replace('\n\n',' ') == ('Интерактивный тренажер по SQL — 4000 ₽. '
+            'Обучение начнется 01 декабря 2026 года. Хотите записаться?')
 
 
 @pytest.mark.parametrize('intent', ['selection','general'])
@@ -106,7 +117,7 @@ def test_generation_receives_history_and_catalog(intent):
 def test_follow_up_price_retains_course():
     result = Advisor(CATALOG, FakeModel('price')).reply('А цена?', {'history':[], 'course_ids':['qa-plus']})
     assert result['course_ids'] == ['qa-plus']
-    assert '5 900' in result['history'][-1]['content']
+    assert str(next(c for c in CATALOG['courses'] if c['id']=='qa-plus')['price_rub']) in result['history'][-1]['content']
 
 
 def test_enrollment_intent_cannot_write_database():
@@ -121,7 +132,7 @@ def test_provider_failure_is_safe():
         def with_structured_output(self, schema):
             raise RuntimeError('SECRET_TOKEN_should_not_leak')
     result = Advisor(CATALOG, Broken()).reply('Привет', {})
-    assert 'недоступен' in result['history'][-1]['content']
+    assert 'не получается ответить' in result['history'][-1]['content']
     assert 'SECRET_TOKEN' not in result['history'][-1]['content']
 
 
@@ -135,8 +146,8 @@ def test_catalog_covers_user_directions_and_levels():
     assert directions >= {'Тестирование ПО','Аналитика данных','Системная аналитика',
                           'Продуктовая аналитика','Бизнес-аналитика','Управление проектами',
                           'Управление продуктом','Дизайн'}
-    assert any(c['level']=='С опытом' for c in CATALOG['courses'])
-    assert all(c['source'].startswith('https://') for c in CATALOG['courses'])
+    assert any(c['level']=='Продвинутый' for c in CATALOG['courses'])
+    assert all('source' not in c for c in CATALOG['courses'])
 
 
 def test_real_provider_accepts_route_schema_without_network():
@@ -171,6 +182,42 @@ def test_new_endpoint_404_retries_legacy_once(monkeypatch):
         return Broken() if len(calls)==1 else FakeModel('price',['qa-plus'])
     monkeypatch.setattr(advisor,'llm',model)
     result=advisor.reply('Цена?',{})
-    assert '5 900' in result['history'][-1]['content']
+    assert str(next(c for c in CATALOG['courses'] if c['id']=='qa-plus')['price_rub']) in result['history'][-1]['content']
     assert advisor._compat_base_url=='https://gigachat.devices.sberbank.ru/api/v1'
     assert len(calls)==2
+
+
+
+def test_demo_catalog_has_full_schedule_and_bounded_prices():
+    from datetime import date
+    for c in CATALOG['courses']:
+        lower,upper=(12000,45000) if c['level']=='Продвинутый' else (4000,15000)
+        assert lower <= c['price_rub'] <= upper
+        assert date.fromisoformat(c['start_date']) >= date(2026,12,1)
+        assert c['duration'] and c['weekly_load']
+        assert 'не подтвержден' not in c['duration'].lower()
+
+
+def test_generated_support_reply_has_follow_up_question():
+    model=FakeModel('general',answer='Обучение проходит онлайн.')
+    reply=Advisor(CATALOG,model).reply('Как проходит обучение?',{})['history'][-1]['content']
+    assert reply.startswith('Обучение проходит онлайн.') and reply.endswith('?')
+
+
+def test_receipt_includes_dates_and_load_without_source():
+    from app import readable, catalog_markdown
+    fields=readable(payload())
+    assert fields['Начало обучения']=='07 декабря 2026 года'
+    assert fields['Примерная нагрузка']=='4–6 часов в неделю'
+    assert 'Источник' not in fields
+    cards=catalog_markdown()
+    assert 'http' not in cards and '4000 ₽' in cards
+    assert '01 декабря 2026 года' in cards
+    assert 'Тестовый проект. Запись сохраняется только в этом приложении.'==CATALOG['notice']
+
+
+def test_old_receipt_remains_readable():
+    from app import readable
+    old=payload()
+    old.pop('start_date');old.pop('weekly_load')
+    assert 'прежней записи' in readable(old)['Начало обучения']

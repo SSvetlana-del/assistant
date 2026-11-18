@@ -10,6 +10,7 @@ import gradio as gr
 from dotenv import load_dotenv
 from advisor.engine import Advisor
 from advisor.storage import create_store
+from advisor.catalog import start_date_text, price_text
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / '.env')
@@ -61,8 +62,9 @@ def make_draft(course_id, name, load, consent, sid):
         raise gr.Error('Подтвердите сохранение параметров записи.')
     c = COURSES[course_id]
     payload = dict(course_id=course_id, course=c['title'], name=name, preferred_load=load,
-                   format=c['format'], duration=c['duration'], price_rub=c['price_rub'], source=c['source'],
-                   scope='Запись только в учебном приложении; без оплаты и зачисления у автора')
+                   format=c['format'], duration=c['duration'], price_rub=c['price_rub'],
+                   weekly_load=c['weekly_load'], start_date=c['start_date'],
+                   scope='Запись на IT Навигаторе. Тестовый проект, оплата не взимается.')
     token = store.draft(sid, payload)
     # Textbox avoids rendering user-supplied names as HTML or Markdown.
     preview = '\n'.join(f'{k}: {v}' for k,v in readable(payload).items())
@@ -70,11 +72,13 @@ def make_draft(course_id, name, load, consent, sid):
 
 
 def readable(record):
-    price = record['price_rub']
     return {'Имя': record['name'], 'Курс': record['course'], 'Формат': record['format'],
-            'Длительность': record['duration'], 'Желаемая нагрузка': record['preferred_load'],
-            'Цена у автора': 'не подтверждена' if price is None else f'{price} ₽',
-            'Источник': record['source'], 'Условия': record['scope']}
+            'Начало обучения': start_date_text(record['start_date']) if record.get('start_date') else 'не указано в прежней записи',
+            'Длительность': record['duration'],
+            'Примерная нагрузка': record.get('weekly_load', 'не указана в прежней записи'),
+            'Желаемая нагрузка': record['preferred_load'],
+            'Стоимость курса': price_text(record['price_rub']) if record.get('price_rub') is not None else 'не указана в прежней записи',
+            'Условия': record['scope']}
 
 
 def confirm(token, sid):
@@ -87,6 +91,7 @@ def confirm(token, sid):
     lines = [f"{'Запись сохранена' if created else 'Вы уже записаны на этот курс'}. Номер: {record['registration_id']}"]
     lines.extend(f'{k}: {v}' for k,v in readable(record).items())
     lines.append('Дата (UTC): '+record['created_at'])
+    lines.append('Есть вопросы по обучению? Напишите — помогу разобраться.')
     notification = '\n'.join(lines)
     # Unique file per receipt, never expose the database or an entire receipts folder.
     with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', prefix='course-confirmation-', encoding='utf-8', delete=False) as out:
@@ -111,8 +116,12 @@ def reset():
 def catalog_markdown():
     lines = []
     for c in CATALOG['courses']:
-        price = 'уточняется' if c['price_rub'] is None else f"{c['price_rub']} ₽"
-        lines.append(f"**{c['title']}** · {c['level']}\n\n{c['direction']} · {c['duration']} · {price}  \n[Карточка источника]({c['source']})\n\n---")
+        lines.append(f"**{c['title']}** · {c['level']}\n\n"
+                     f"{c['direction']}\n\n"
+                     f"Стоимость: **{price_text(c['price_rub'])}**  \n"
+                     f"Начало обучения: **{start_date_text(c['start_date'])}**  \n"
+                     f"Длительность: {c['duration']}  \n"
+                     f"Примерная нагрузка: {c['weekly_load']}\n\n---")
     return '\n\n'.join(lines)
 
 
@@ -127,7 +136,7 @@ def build_app():
             gr.Markdown('Демо: история и записи могут сбрасываться после перезапуска сервера. Скачайте подтверждение записи.')
         with gr.Row():
             with gr.Column(scale=3):
-                chat = gr.Chatbot(height=500, label='Консультант', buttons=['copy'],
+                chat = gr.Chatbot(height=500, label='Поддержка IT Навигатора', buttons=['copy'],
                                   placeholder='Расскажите, чему хотите научиться и какой у вас опыт.')
                 message = gr.Textbox(label='Ваш вопрос', placeholder='Хочу перейти из маркетинга в продуктовую аналитику. С чего начать?', max_lines=5, interactive=False)
                 with gr.Row():
@@ -137,7 +146,7 @@ def build_app():
                                       ['Есть ли продвинутые курсы для дизайнеров?'],
                                       ['Сколько стоит курс по тестированию?'],
                                       ['Хочу записаться на курс по управлению продуктом']], inputs=message)
-                gr.Markdown('Диалог привязан к этому браузеру. Модели передаются последние 30 сообщений. Для тестов используйте вымышленное имя. «Новый диалог» начинает отдельную историю.')
+                gr.Markdown('Диалог привязан к этому браузеру. Для продолжения беседы возвращайтесь в этот браузер. «Новый диалог» начинает отдельную историю.')
             with gr.Column(scale=2):
                 gr.Markdown('## Запись на курс\nВыберите параметры, проверьте их и подтвердите. Оплата не требуется.')
                 course = gr.Dropdown(choices=[(c['title'], c['id']) for c in COURSES.values()], label='Курс')
@@ -148,7 +157,7 @@ def build_app():
                 preview = gr.Textbox(label='Параметры записи', interactive=False, lines=8)
                 confirm_btn = gr.Button('Подтвердить запись', variant='primary', interactive=False)
                 receipt = gr.File(label='Скачать подтверждение', interactive=False)
-        with gr.Accordion('Каталог и источники · проверено '+CATALOG['checked_at'], open=False):
+        with gr.Accordion('Курсы IT Навигатора', open=False):
             gr.Markdown(catalog_markdown())
         if not os.getenv('GIGACHAT_CREDENTIALS'):
             gr.Markdown('⚙️ GigaChat ещё не подключён: добавьте ключ в `.env` на сервере. Каталог и запись уже работают.')
