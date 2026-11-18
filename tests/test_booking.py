@@ -164,3 +164,41 @@ def test_confirmation_phrase_is_not_a_name(service):
     service.turn('one','Хочу записаться на SQL');service.turn('one','1')
     state=service.turn('one','всё верно')
     assert state['booking']['stage']=='name' and not state['booking'].get('name')
+
+
+def test_ambiguous_date_and_wrong_two_digit_year_require_clarification(service):
+    service.turn('one','Хочу записаться на SQL')
+    for text in ['1 декабря 2026 или 15 декабря 2026','01.12.27']:
+        state=service.turn('one',text)
+        assert state['booking']['stage']=='date' and count(service)==0
+
+
+def test_new_booking_after_previous_confirmation_can_start(service):
+    prepare(service);service.turn('one','Подтверждаю')
+    service.turn('one','Сколько стоит другой курс?')
+    class EnrollAfterYes(AdvisorStub):
+        def reply(self,text,saved):
+            result=super().reply(text,saved)
+            result['route']='enroll';result['course_ids']=['qa']
+            return result
+    service.advisor=EnrollAfterYes()
+    state=service.turn('one','Да')
+    assert state['booking']['stage']=='date' and state['booking']['course_id']=='qa'
+    assert count(service)==1
+
+
+def test_cancel_after_confirm_does_not_claim_enrollment_removed(service):
+    prepare(service);service.turn('one','Подтверждаю')
+    state=service.turn('one','Отмена')
+    assert 'подтверждённая запись сохранена' in state['history'][-1]['content']
+    assert count(service)==1
+
+
+def test_booking_respects_requested_advanced_level(service):
+    state=service.turn('one','Хочу записаться на продвинутый курс системный аналитик')
+    assert state['booking']['course_id']=='system-middle'
+
+
+def test_missing_advanced_course_is_not_replaced_by_beginner(service):
+    state=service.turn('one','Хочу записаться на продвинутый бизнес-аналитик')
+    assert state['booking']['stage']=='course' and not state['booking'].get('course_id')

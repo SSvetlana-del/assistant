@@ -39,7 +39,10 @@ class ChatService:
             return choices[int(value)-1]
         full = [c['id'] for c in self.courses.values() if normalize(c['title']) in value or value==c['id']]
         if full:
-            return max(full,key=lambda cid:len(self.courses[cid]['title']))
+            chosen=max(full,key=lambda cid:len(self.courses[cid]['title']))
+            if ('продвин' in value or 'мидл' in value) and self.courses[chosen]['level']!='Продвинутый':
+                return {'system':'system-middle','project':'project-middle','product':'product-pro'}.get(chosen)
+            return chosen
         aliases={'sql':'sql','бизнес-аналит':'business','бизнес аналит':'business',
                  'продуктовый аналит':'product-analytics','продуктовая аналит':'product-analytics',
                  'системный аналит':'system','системная аналит':'system',
@@ -63,16 +66,18 @@ class ChatService:
             return available[0]
         if value.isdigit() and 1 <= int(value) <= len(available):
             return available[int(value)-1]
+        matches=[]
         for iso in available:
             d=date.fromisoformat(iso)
             patterns=[iso, d.strftime('%d.%m.%Y'), d.strftime('%d.%m'),
                       f'{d.day} {MONTHS[d.month-1]}',f'{d.day:02d} {MONTHS[d.month-1]}']
             # Explicit years must match; "1 декабря 2027" cannot silently select 2026.
             years=re.findall(r'\b20\d{2}\b',text)
+            years += [str(2000+int(y)) for y in re.findall(r'\b\d{1,2}\.\d{1,2}\.(\d{2})\b',text)]
             if years and str(d.year) not in years:continue
             if any(re.search(r'(?<!\d)'+re.escape(p)+r'(?!\d)',text.casefold()) for p in patterns):
-                return iso
-        return None
+                matches.append(iso)
+        return matches[0] if len(matches)==1 else None
 
     @staticmethod
     def name_from_text(text):
@@ -122,7 +127,9 @@ class ChatService:
 
     def resolve_course(self, text, saved):
         cid=self.course_from_text(text,saved.get('booking') or {})
-        if cid:return cid
+        if cid:
+            if ('продвин' in normalize(text) or 'мидл' in normalize(text)) and self.courses[cid]['level']!='Продвинутый':return None
+            return cid
         value=normalize(text)
         generic={'хочу записаться','записаться','запиши меня','оформить запись','хочу оформить запись','помоги записаться'}
         ids=saved.get('course_ids',[])
@@ -131,7 +138,9 @@ class ChatService:
         if classify:
             result=classify({'history':saved.get('history',[])+[{'role':'user','content':text}],'course_ids':[]})
             ids=result.get('course_ids',[])
-            if not result.get('error') and len(ids)==1:return ids[0]
+            if not result.get('error') and len(ids)==1:
+                if ('продвин' in value or 'мидл' in value) and self.courses[ids[0]]['level']!='Продвинутый':return None
+                return ids[0]
         return None
 
     def seed(self, text, ids):
@@ -154,7 +163,7 @@ class ChatService:
         question_like = '?' in text or bool(re.match(r'^(сколько|как|какая|какой|когда|где|можно|расскажи|подскажи|что)\b', value))
         if value in CANCEL or re.fullmatch(r'(?:я )?(?:хочу )?(?:отменить|отмена|передумал|передумала)(?: запись)?', value):
             self.cancel_draft(sid);state={}
-            answer='Хорошо, запись не оформляем. Могу помочь подобрать другую программу — какое направление вам интересно?'
+            answer=('Незавершённой заявки сейчас нет. Уже подтверждённая запись сохранена. Есть вопросы по обучению?' if saved.get('last_receipt') and not saved.get('booking') else 'Хорошо, эту заявку не оформляем. Могу помочь подобрать другую программу — какое направление вам интересно?')
         elif state:
             if value in CONFIRM and state['stage']=='confirm' and not question_like:
                 try:
@@ -164,6 +173,7 @@ class ChatService:
                     answer='Срок подтверждения истёк. '+self.advance(sid,state)
                 else:
                     saved['last_receipt']=record
+                    saved['confirmation_echo_pending']=True
                     state={}
                     answer=(f"{'Готово, вы записаны' if created else 'Вы уже записаны'} на курс **«{record['course']}»**! "
                             f"Начало — {start_date_text(record['start_date']) if record.get('start_date') else 'по прежним условиям'}.\n\n"
@@ -186,7 +196,7 @@ class ChatService:
             elif state['stage']=='date':
                 chosen=self.choose_date(text,self.courses[state['course_id']])
                 if chosen:state['start_date']=chosen;answer=self.advance(sid,state)
-                else:answer='На эту дату старт не найден. '+self.prompt(state)
+                else:answer='Уточните одну дату из доступных вариантов. '+self.prompt(state)
             elif state['stage']=='name':
                 name=None if question_like else self.name_from_text(text)
                 if name:state['name']=name;answer=self.advance(sid,state)
@@ -198,13 +208,13 @@ class ChatService:
                 context=dict(saved,course_ids=[state['course_id']] if state.get('course_id') else [])
                 reply=self.advisor.reply(text,context)
                 answer=reply['history'][-1]['content']+'\n\n'+self.prompt(state)
-        elif value in CONFIRM and saved.get('last_receipt'):
+        elif value in (CONFIRM-{'да','всё верно','все верно'}) and saved.get('confirmation_echo_pending') and saved.get('last_receipt'):
             answer='Эта запись уже сохранена — повторно оформлять её не нужно. Хотите выбрать другой курс?'
         else:
-            cid=self.course_from_text(text,{})
+            saved['confirmation_echo_pending']=False
             explicit=bool(re.search(r'запис|оформить',value)) and not bool(re.search(r'как.*запис',value))
             if explicit:
-                resolved=cid or self.resolve_course(text,saved)
+                resolved=self.resolve_course(text,saved)
                 ids=[resolved] if resolved else []
                 state=self.seed(text,ids)
                 answer=self.advance(sid,state)
