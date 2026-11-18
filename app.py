@@ -7,6 +7,8 @@ import tempfile
 from pathlib import Path
 
 import gradio as gr
+from starlette.middleware import Middleware
+from advisor.web_language import RussianHTMLMiddleware
 from dotenv import load_dotenv
 from advisor.engine import Advisor
 from advisor.storage import create_store
@@ -145,7 +147,7 @@ def build_app():
                 gr.Examples(examples=[['Подбери курс по бизнес-аналитике для новичка'],
                                       ['Есть ли продвинутые курсы для дизайнеров?'],
                                       ['Сколько стоит курс по тестированию?'],
-                                      ['Хочу записаться на курс по управлению продуктом']], inputs=message)
+                                      ['Хочу записаться на курс по управлению продуктом']], inputs=message, label='Примеры вопросов')
                 gr.Markdown('Диалог привязан к этому браузеру. Для продолжения беседы возвращайтесь в этот браузер. «Новый диалог» начинает отдельную историю.')
             with gr.Column(scale=2):
                 gr.Markdown('## Запись на курс\nВыберите параметры, проверьте их и подтвердите. Оплата не требуется.')
@@ -177,5 +179,6 @@ def build_app():
 if __name__ == '__main__':
     build_app().launch(server_name=os.getenv('APP_HOST', '0.0.0.0' if os.getenv('RENDER') else '127.0.0.1'),
                        server_port=int(os.getenv('PORT') or os.getenv('APP_PORT', '7860')),
-                       share=False, show_error=False, theme=gr.themes.Soft(primary_hue='indigo'),
+                       share=False, show_error=False, footer_links=[],
+                       app_kwargs={'middleware': [Middleware(RussianHTMLMiddleware)]}, theme=gr.themes.Soft(primary_hue='indigo'),
                        blocked_paths=[p for p in [str(ROOT / '.env'), store.path, str(SECRET_FILE)] if p])
