@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: it-navigator
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.lock
+    startCommand: python app.py
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      - key: APP_HOST
+        value: 0.0.0.0
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: GRADIO_ANALYTICS_ENABLED
+        value: "False"
+      - key: GIGACHAT_CREDENTIALS
+        sync: false
+      - key: GIGACHAT_SCOPE
+        value: GIGACHAT_API_PERS
+      - key: GIGACHAT_MODEL
+        value: GigaChat
+      - key: GIGACHAT_BASE_URL
+        value: https://api.giga.chat/v1
+      - key: BROWSER_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
