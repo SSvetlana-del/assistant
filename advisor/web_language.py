@@ -1,6 +1,14 @@
 """Declare the site's language in the server-rendered HTML before browser detection."""
 import re
 
+# Gradio's runtime chooses its locale from navigator.language and rewrites <html lang>.
+# This application is Russian-only, including when the browser UI is English.
+LANGUAGE_GUARD = b'''<script>(function(){
+const setRussian=function(){if(document.documentElement.lang!=="ru")document.documentElement.lang="ru";};
+setRussian();
+new MutationObserver(setRussian).observe(document.documentElement,{attributes:true,attributeFilter:["lang"]});
+})();</script>'''
+
 
 class RussianHTMLMiddleware:
     def __init__(self, app):
@@ -31,6 +39,7 @@ class RussianHTMLMiddleware:
                     tag = re.sub(rb'\s+lang\s*=\s*([\"\']).*?\1', b'', match.group(0), flags=re.I)
                     return tag[:-1] + b' lang="ru">'
                 body = re.sub(rb'<html\b[^>]*>', russian_tag, body, count=1, flags=re.I)
+                body = body.replace(b'</head>', LANGUAGE_GUARD + b'</head>', 1)
                 start['headers'] = [(k,v) for k,v in start['headers']
                                     if k.lower() not in (b'content-length', b'content-language')]
                 start['headers'] += [(b'content-language', b'ru'), (b'content-length', str(len(body)).encode())]
