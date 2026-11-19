@@ -29,7 +29,7 @@ SECRET_FILE=Path(store.path).parent/'browser.secret' if store.path else ROOT/'da
 if not SECRET_FILE.exists():
     SECRET_FILE.write_text(secrets.token_hex(32));SECRET_FILE.chmod(0o600)
 
-WELCOME={'role':'assistant','content':'Здравствуйте! Я Навигатор, AI-консультант платформы. Помогу выбрать курс, расскажу об обучении и оформлю запись прямо здесь.\n\nКакую задачу хотите решить: освоить новую профессию или развить навыки?'}
+WELCOME={'role':'assistant','content':'Здравствуйте! Я Навигатор. Помогу выбрать курс, сравнить программы и оформить заявку.\n\nВы хотите освоить новую профессию или развить навыки?'}
 
 
 def session_id(value):
@@ -115,8 +115,7 @@ def catalog_cards(direction='Все направления',level='Любой у
         starts=start_date_text(dates(c)[0]).replace(' года','')
         cards.append(f'<article class="course-card"><div class="course-tags"><span class="course-tag{pro}">{e(c["level"])}</span></div>'
                      f'<h3>{e(c["title"])}</h3><div class="course-meta">{e(c["duration"])} · {e(c["weekly_load"])}<br>Ближайший старт: {e(starts)} · ещё 2 даты</div>'
-                     f'<p class="course-description">{e(c["description"])}</p>'
-                     f'<details class="course-details"><summary>Программа и результат</summary><p>{e(c["audience"])}</p>'
+                     f'<details class="course-details"><summary>Программа и результат</summary><p>{e(c["description"])}</p><p>{e(c["audience"])}</p>'
                      + '<ul>'+''.join('<li>'+e(t)+'</li>' for t in c['syllabus'])+'</ul>'
                      + f'<p><strong>Практика:</strong> {e(c["final_project"])}</p><p><strong>Результат:</strong> {e("; ".join(c["outcomes"]))}</p>'
                      f'<p><strong>Входные знания:</strong> {e(c["prerequisites"])}</p><p>{e(c["limitations"])}</p></details>'
@@ -135,12 +134,12 @@ def build_app():
         browser=gr.BrowserState(None,storage_key='it-advisor-session-v1',secret=os.getenv('BROWSER_SECRET') or SECRET_FILE.read_text())
         sid=gr.State('')
         pending=gr.State('')
-        gr.HTML('<header class="brand-nav"><div class="brand"><span class="brand-mark">✦</span>IT Навигатор</div><div class="nav-links"><span>Обучение, которое подходит вам</span><span class="nav-label">ОНЛАЙН-ПЛАТФОРМА</span></div></header>')
-        gr.HTML('<section class="hero"><div><div class="eyebrow">ЗНАНИЯ ДЛЯ НОВОГО ЭТАПА</div><h1>Ваш следующий шаг в IT.<br><span>Давайте найдём его вместе.</span></h1><p>Расскажите о своих планах. Навигатор поможет выбрать программу,<br>разобраться в условиях и записаться на удобный старт.</p></div><div class="hero-note"><strong>17 программ</strong>от первого знакомства до уверенного роста</div></section>')
+        gr.HTML('<header class="brand-nav"><div class="brand"><span class="brand-mark"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="18" fill="#5757ef"/><path d="M17 29 48 16 35 48l-5-14Z" fill="#fff"/><path d="m30 34 18-18-13 32Z" fill="#d7d3ff"/></svg></span>IT Навигатор</div><nav class="nav-links" aria-label="Навигация"><a href="#workspace">Помощь с выбором</a><a href="#catalog-panel">Каталог курсов</a><span class="nav-label">ОНЛАЙН-ПЛАТФОРМА</span></nav></header>')
+        gr.HTML('<section class="hero"><div><div class="eyebrow">ОБРАЗОВАНИЕ ДЛЯ ВАШЕГО СЛЕДУЮЩЕГО ШАГА</div><h1>Найдите свой <span>курс в IT.</span></h1><p>Сравните программы и обсудите обучение с AI-консультантом.</p></div><div class="hero-note"><strong>17 программ</strong>8 направлений · 2 уровня</div></section>')
         with gr.Row(elem_id='workspace'):
-            with gr.Column(scale=7,min_width=370,elem_id='chat-shell'):
-                gr.HTML('<div class="chat-header"><div class="agent"><span class="agent-symbol">✦</span><div><div class="agent-name">Навигатор</div><div class="agent-sub">Ваш AI-консультант по обучению</div></div></div><div class="online" id="assistant-status" role="status" aria-live="polite">На связи</div></div>')
-                chat=gr.Chatbot(value=[WELCOME],height=520,show_label=False,buttons=['copy'],elem_id='conversation',
+            with gr.Column(scale=7,min_width=480,elem_id='chat-shell'):
+                gr.HTML('<div class="chat-header"><div class="agent"><span class="agent-symbol"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="18" fill="#5757ef"/><path d="M17 29 48 16 35 48l-5-14Z" fill="#fff"/><path d="m30 34 18-18-13 32Z" fill="#d7d3ff"/></svg></span><div><div class="agent-name">Навигатор</div><div class="agent-sub">AI-консультант<span class="desktop-only"> по обучению</span></div></div></div><div class="online" id="assistant-status" role="status" aria-live="polite">На связи</div></div>')
+                chat=gr.Chatbot(value=[WELCOME],height=350,show_label=False,buttons=['copy'],elem_id='conversation',
                                 avatar_images=(None,str(ROOT/'assets/navigator.svg')),group_consecutive_messages=False)
                 progress=gr.HTML('',elem_id='progress')
                 with gr.Row(visible=False,elem_id='confirm-actions') as confirm_row:
@@ -148,18 +147,19 @@ def build_app():
                     change_btn=gr.Button('Изменить данные')
                     cancel_btn=gr.Button('Отменить запись')
                 with gr.Row(elem_id='composer'):
-                    message=gr.Textbox(label='Ваше сообщение',show_label=False,placeholder='Напишите вопрос или «Хочу записаться»…',lines=1,max_lines=4,interactive=False,scale=8,elem_id='message-input')
+                    message=gr.Textbox(label='Ваше сообщение',show_label=False,placeholder='Ваш вопрос о курсах…',lines=1,max_lines=4,interactive=False,scale=8,elem_id='message-input')
                     submit=gr.Button('Отправить ↑',variant='primary',interactive=False,scale=1,elem_id='send-button')
                 with gr.Row(elem_id='suggestions'):
                     pick=gr.Button('Подобрать курс',interactive=False)
                     compare=gr.Button('Сравнить программы',interactive=False)
                     book=gr.Button('Хочу записаться',interactive=False)
-                gr.HTML('<div class="chat-bottom"><span>Отвечаем на вопросы и записываем прямо в чате</span><span>✧ IT Навигатор</span></div>')
-                clear=gr.Button('Новый диалог',elem_id='reset-button')
-            with gr.Column(scale=3,min_width=285,elem_id='sidebar'):
-                gr.HTML('<section class="side-intro"><span class="side-tag">БЕЗ ЛИШНИХ ШАГОВ</span><h2>От «что выбрать?»<br>до «я записан».</h2><p>Всё в одном диалоге. Выбираем курс и старт, знакомимся, оставляем контакт и проверяем заявку.</p><div class="side-steps"><span>1</span> Курс <span>2</span> Дата <span>3</span> Имя <span>4</span> Контакт <span>5</span> Готово</div></section>')
+                gr.HTML('<div class="chat-bottom"><span>Отвечаем на вопросы и записываем прямо в чате</span><span>IT Навигатор</span></div>')
+                with gr.Row(elem_id='reset-actions'):
+                    clear=gr.Button('Новый диалог',elem_id='reset-button',scale=0,min_width=0)
+            with gr.Column(scale=3,min_width=340,elem_id='sidebar'):
+                gr.HTML('<section class="side-intro"><span class="side-tag">ПОМОЖЕМ ОПРЕДЕЛИТЬСЯ</span><h2>Курс, который подходит вам.</h2><p>Расскажите о цели и опыте — Навигатор поможет сравнить программы и выбрать удобный старт.</p><div class="side-steps"><span>Подбор</span><span>Сравнение</span><span>Запись</span></div></section>')
                 with gr.Column(elem_id='catalog-panel'):
-                    gr.HTML('<div class="catalog-heading">Найдите свою программу <span>17 КУРСОВ</span></div>')
+                    gr.HTML('<div class="catalog-heading">Выберите курс <span>17 программ</span></div>')
                     direction=gr.Dropdown(['Все направления']+list(dict.fromkeys(c['direction'] for c in COURSES.values())),value='Все направления',label='Направление',interactive=True)
                     level=gr.Dropdown(['Любой уровень','Начальный','Продвинутый'],value='Любой уровень',label='Ваш уровень',interactive=True)
                     availability=gr.Dropdown(['Любое время','До 5 ч/нед','До 8 ч/нед'],value='Любое время',label='Время на учёбу',interactive=True)
