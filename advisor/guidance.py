@@ -142,4 +142,4 @@ def program_answer(c):
     return (course_summary(c)+f"\n\nДля кого: {c['audience']}\nВходные знания: {c['prerequisites']}"
             f"\n\n**Что изучите:**\n{modules}\n\n**Практика:** {c['final_project']}"
             f"\n\n**Результат:**\n{outcomes}\n\nИнструменты: {', '.join(c['tools'])}."
-            f"\n\n{c['limitations']}\n\nХотите записаться или уточнить содержание программы?")
+            f"\n\n{c['limitations']}\n\nХотите записаться или рассмотреть другие курсы?")
