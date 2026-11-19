@@ -20,6 +20,9 @@ def start(service):
 
 
 @pytest.mark.parametrize('text,kind,value',[
+ ('email@example.com','email','email@example.com'),
+ ('emailman@example.com','email','emailman@example.com'),
+ ('+84 912 345 678','phone','+84912345678'),
  ('anna+course@Example.com','email','anna+course@example.com'),
  ('Мой email: anna@example.com','email','anna@example.com'),
  ('+7 (999) 123-45-67','phone','+79991234567'),
