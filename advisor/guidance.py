@@ -27,7 +27,18 @@ def comparison_scope_reply(text, history):
 
 
 def is_program(text):
-    return bool(re.search(r'что.*(?:входит|изуч|науч)|программ[ауы]|содержан|темы|чему.*науч|расскажи.*курс', text.casefold()))
+    return bool(re.search(r'что.*(?:входит|изуч|науч)|\bпрограмм(?:а|у|ы|е|ой|ах|ам|ами)\b|содержан|темы|чему.*науч|расскажи.*курс', text.casefold()))
+
+
+
+def is_conversation_end(text, history):
+    value=norm(text)
+    if re.search(r'вопросов (?:больше )?нет|больше нет вопросов|нет вопросов|на этом вс[её]|до свидания|спасибо.*пока',value):
+        return True
+    if value in {'спасибо','спасибо большое','всё понятно','все понятно'}:return True
+    last=next((m['content'] for m in reversed(history) if m['role']=='assistant'),'')
+    return (value in {'нет','нет спасибо','не осталось','больше нет','нет больше вопросов'}
+            and bool(re.search(r'(?:есть|остались).*вопрос|что ещ[её].*(?:узнать|уточнить)|вопросов (?:больше )?нет',last,re.I)))
 
 
 def explicit_enrollment(text):

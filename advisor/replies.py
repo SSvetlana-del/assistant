@@ -11,4 +11,6 @@ def clean_support_reply(text):
     match=TRAILING_QUESTIONS.search(result)
     if match:
         result=result[:match.start()]+match.group('first').rstrip()
+    if re.search(r'вопросов (?:больше )?нет',result,re.I):
+        result=re.sub(r'\s*(?:Что ещ[её] хотите (?:узнать|уточнить) об обучении|Есть ещ[её] вопросы(?: об обучении)?)\?\s*$','',result,flags=re.I)
     return result.strip()

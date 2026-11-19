@@ -202,10 +202,10 @@ def test_demo_catalog_has_full_schedule_and_bounded_prices():
         assert 'не подтвержден' not in c['duration'].lower()
 
 
-def test_generated_support_reply_has_follow_up_question():
+def test_generated_reply_does_not_get_an_automatic_question():
     model=FakeModel('general',answer='Обучение проходит онлайн.')
     reply=Advisor(CATALOG,model).reply('Как проходит обучение?',{})['history'][-1]['content']
-    assert reply.startswith('Обучение проходит онлайн.') and reply.endswith('?')
+    assert reply=='Обучение проходит онлайн.'
 
 
 def test_catalog_display_and_no_download_component():
