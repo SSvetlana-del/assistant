@@ -14,6 +14,7 @@ from advisor.engine import Advisor
 from advisor.storage import create_store
 from advisor.catalog import start_date_text, price_text
 from advisor.booking import ChatService, dates
+from advisor.replies import clean_support_reply
 
 ROOT=Path(__file__).resolve().parent
 load_dotenv(ROOT/'.env')
@@ -46,7 +47,9 @@ def progress_html(state):
 
 
 def view(saved):
-    return ([WELCOME]+saved.get('history',[]),
+    history=[dict(m,content=clean_support_reply(m['content'])) if m['role']=='assistant' else dict(m)
+             for m in saved.get('history',[])]
+    return ([WELCOME]+history,
             gr.update(visible=saved.get('booking',{}).get('stage')=='confirm'),
             progress_html(saved.get('booking') or {}))
 
@@ -76,7 +79,18 @@ def enable_controls():
 BUSY_JS = """(...args) => {
  const input=document.querySelector('#message-input textarea');
  if(input)input.disabled=true;
+ const status=document.querySelector('#assistant-status');
+ if(status){status.textContent='Готовлю ответ…';status.classList.add('is-busy');}
+ document.querySelector('#conversation')?.setAttribute('aria-busy','true');
  document.querySelectorAll('#send-button, #suggestions button, #confirm-actions button, #reset-button').forEach(b=>b.disabled=true);
+ return args;
+}"""
+
+
+READY_JS = """(...args) => {
+ const status=document.querySelector('#assistant-status');
+ if(status){status.textContent='На связи';status.classList.remove('is-busy');}
+ document.querySelector('#conversation')?.removeAttribute('aria-busy');
  return args;
 }"""
 
@@ -125,7 +139,7 @@ def build_app():
         gr.HTML('<section class="hero"><div><div class="eyebrow">ЗНАНИЯ ДЛЯ НОВОГО ЭТАПА</div><h1>Ваш следующий шаг в IT.<br><span>Давайте найдём его вместе.</span></h1><p>Расскажите о своих планах. Навигатор поможет выбрать программу,<br>разобраться в условиях и записаться на удобный старт.</p></div><div class="hero-note"><strong>17 программ</strong>от первого знакомства до уверенного роста</div></section>')
         with gr.Row(elem_id='workspace'):
             with gr.Column(scale=7,min_width=370,elem_id='chat-shell'):
-                gr.HTML('<div class="chat-header"><div class="agent"><span class="agent-symbol">✦</span><div><div class="agent-name">Навигатор</div><div class="agent-sub">Ваш AI-консультант по обучению</div></div></div><div class="online">На связи</div></div>')
+                gr.HTML('<div class="chat-header"><div class="agent"><span class="agent-symbol">✦</span><div><div class="agent-name">Навигатор</div><div class="agent-sub">Ваш AI-консультант по обучению</div></div></div><div class="online" id="assistant-status" role="status" aria-live="polite">На связи</div></div>')
                 chat=gr.Chatbot(value=[WELCOME],height=520,show_label=False,buttons=['copy'],elem_id='conversation',
                                 avatar_images=(None,str(ROOT/'assets/navigator.svg')),group_consecutive_messages=False)
                 progress=gr.HTML('',elem_id='progress')
@@ -151,15 +165,16 @@ def build_app():
                     availability=gr.Dropdown(['Любое время','До 5 ч/нед','До 8 ч/нед'],value='Любое время',label='Время на учёбу',interactive=True)
                     cards=gr.HTML(catalog_cards())
         gr.HTML('<footer class="page-footer"><span>© 2026 IT Навигатор · Вместе к новым возможностям</span><span>'+html.escape(CATALOG['notice'])+'</span></footer>')
-        queue=dict(concurrency_id='advisor',concurrency_limit=1,api_name=False)
-        demo.load(restore,[browser],[browser,sid,chat,confirm_row,progress,message,submit,pick,compare,book],api_name=False)
+        queue=dict(concurrency_id='advisor',concurrency_limit=1,api_name=False,show_progress='hidden')
+        demo.load(restore,[browser],[browser,sid,chat,confirm_row,progress,message,submit,pick,compare,book],api_name=False,show_progress='hidden')
         controls=[message,submit,pick,compare,book,confirm_btn,change_btn,cancel_btn,clear]
         def wire(component,text=None,enter=False):
             fn=capture if text is None else lambda history,text=text:capture(text,history)
             event=(component.submit if enter else component.click)(fn,[message,chat] if text is None else [chat],
-                      [pending,chat]+controls,queue=False,api_name=False,js=BUSY_JS)
+                      [pending,chat]+controls,queue=False,api_name=False,show_progress='hidden',js=BUSY_JS)
             result=event.success(answer,[pending,sid],[chat,confirm_row,progress],**queue)
-            result.then(enable_controls,[],controls,queue=False,api_name=False)
+            result.success(enable_controls,[],controls,queue=False,api_name=False,show_progress='hidden',js=READY_JS)
+            result.failure(enable_controls,[],controls,queue=False,api_name=False,show_progress='hidden',js=READY_JS)
         wire(submit)
         wire(message,enter=True)
         for button,text in [(pick,'Помогите подобрать курс'),(compare,'Хочу сравнить программы'),(book,'Хочу записаться'),
@@ -167,7 +182,7 @@ def build_app():
             wire(button,text)
         clear.click(reset,[],[browser,sid,chat,confirm_row,progress,message],**queue)
         for field in (direction,level,availability):
-            field.input(catalog_cards,[direction,level,availability],[cards],api_name=False)
+            field.input(catalog_cards,[direction,level,availability],[cards],api_name=False,show_progress='hidden')
     return demo.queue(max_size=32)
 
 

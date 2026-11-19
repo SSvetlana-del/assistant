@@ -128,3 +128,8 @@ footer {display:none!important;}
 #conversation table { display:block; width:100%; max-width:100%; overflow-x:auto; border-collapse:collapse; font-size:12px; }
 #conversation th, #conversation td { min-width:150px; padding:10px; vertical-align:top; border:1px solid #e8ebf4; }
 #conversation th:first-child, #conversation td:first-child { min-width:100px; font-weight:600; }
+
+.online.is-busy { color:#5757ef; background:#f0efff; white-space:nowrap; }
+.online.is-busy:before { background:#7471ed; }
+/* Gradio keeps hidden timing text in the DOM; errors remain visible. */
+.gradio-container [data-testid="status-tracker"] .progress-text { display:none!important; }
