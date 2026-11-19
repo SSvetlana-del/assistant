@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
-from advisor.booking import ChatService, receipt_fields
+from advisor.booking import ChatService
 from advisor.storage import Store
 
 CATALOG=json.loads((Path(__file__).parents[1]/'data/courses.json').read_text())
@@ -28,7 +28,8 @@ def count(service):
 def prepare(service,sid='one'):
     service.turn(sid,'Хочу записаться на SQL')
     service.turn(sid,'1 декабря 2026')
-    return service.turn(sid,'Меня зовут Анна')
+    service.turn(sid,'Меня зовут Анна')
+    return service.turn(sid,'anna@example.com')
 
 
 def test_complete_chat_booking_requires_confirmation(service):
@@ -36,7 +37,9 @@ def test_complete_chat_booking_requires_confirmation(service):
     assert first['booking']['stage']=='date' and count(service)==0
     second=service.turn('one','1 декабря 2026')
     assert second['booking']['stage']=='name' and count(service)==0
-    preview=service.turn('one','Меня зовут Анна')
+    contact=service.turn('one','Меня зовут Анна')
+    assert contact['booking']['stage']=='contact' and count(service)==0
+    preview=service.turn('one','anna@example.com')
     assert preview['booking']['stage']=='confirm' and count(service)==0
     assert '4000 ₽' in preview['history'][-1]['content']
     saved=service.turn('one','Подтверждаю')
@@ -100,6 +103,8 @@ def test_stored_booking_survives_service_restart(service):
     state=restarted.turn('one','1')
     assert state['booking']['stage']=='name'
     state=restarted.turn('one','Анна')
+    assert state['booking']['stage']=='contact' and count(service)==0
+    state=restarted.turn('one','anna@example.com')
     assert state['booking']['stage']=='confirm' and count(service)==0
 
 
@@ -137,7 +142,7 @@ def test_workload_filters_catalog_only():
 
 
 def test_all_details_in_one_message_still_require_confirmation(service):
-    state=service.turn('one','Хочу записаться на SQL 1 декабря 2026, меня зовут Анна')
+    state=service.turn('one','Хочу записаться на SQL 1 декабря 2026, меня зовут Анна, anna@example.com')
     assert state['booking']['stage']=='confirm' and count(service)==0
     assert state['booking']['name']=='Анна'
 

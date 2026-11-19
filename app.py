@@ -4,8 +4,6 @@ import json
 import os
 import re
 import secrets
-import tempfile
-from functools import lru_cache
 from pathlib import Path
 
 import gradio as gr
@@ -15,7 +13,7 @@ from advisor.web_language import RussianHTMLMiddleware
 from advisor.engine import Advisor
 from advisor.storage import create_store
 from advisor.catalog import start_date_text, price_text
-from advisor.booking import ChatService, dates, receipt_fields, receipt_text
+from advisor.booking import ChatService, dates
 
 ROOT=Path(__file__).resolve().parent
 load_dotenv(ROOT/'.env')
@@ -37,34 +35,25 @@ def session_id(value):
     return value if isinstance(value,str) and re.fullmatch(r'[a-f0-9]{64}',value) else secrets.token_hex(32)
 
 
-@lru_cache(maxsize=1024)
-def receipt_file(serialized):
-    with tempfile.NamedTemporaryFile(mode='w',suffix='.txt',prefix='it-navigator-',encoding='utf-8',delete=False) as out:
-        out.write(receipt_text(json.loads(serialized)))
-        return out.name
-
-
 def progress_html(state):
     stage=state.get('stage')
-    steps={'course':0,'date':1,'name':2,'confirm':3}
+    steps={'course':0,'date':1,'name':2,'contact':3,'confirm':4}
     if not stage:return ''
-    current=steps.get(stage,3)
-    label={'course':'Выбираем курс','date':'Выбираем дату','name':'Знакомимся','confirm':'Проверяем данные','edit':'Изменяем данные'}[stage]
-    dots=''.join(f'<span class="progress-dot {"done" if i<current else "active" if i==current else ""}"></span>' for i in range(4))
+    current=steps.get(stage,4)
+    label={'course':'Выбираем курс','date':'Выбираем дату','name':'Знакомимся','contact':'Контакт для связи','confirm':'Проверяем данные','edit':'Изменяем данные'}[stage]
+    dots=''.join(f'<span class="progress-dot {"done" if i<current else "active" if i==current else ""}"></span>' for i in range(5))
     return f'<div class="booking-progress">{dots}<b>{label}</b></div>'
 
 
 def view(saved):
-    record=saved.get('last_receipt')
-    file=receipt_file(json.dumps(record,ensure_ascii=False,sort_keys=True)) if record else None
-    return ([WELCOME]+saved.get('history',[]),gr.update(value=file,visible=bool(file)),
+    return ([WELCOME]+saved.get('history',[]),
             gr.update(visible=saved.get('booking',{}).get('stage')=='confirm'),
             progress_html(saved.get('booking') or {}))
 
 
 def restore(value):
     sid=session_id(value)
-    return (sid,sid,*view(store.load(sid)),*[gr.update(interactive=True) for _ in range(5)])
+    return (sid,sid,*view(service.restore(sid)),*[gr.update(interactive=True) for _ in range(5)])
 
 
 def answer(text,sid):
@@ -123,11 +112,6 @@ def catalog_cards(direction='Все направления',level='Любой у
     return f'<div class="catalog-count">Найдено программ: {len(selected)}</div><div class="course-list">'+(''.join(cards) or empty)+'</div><div class="catalog-tip">Понравилась программа? Напишите её название в чате — помогу с выбором и записью.</div>'
 
 
-# Compatibility helpers for existing saved confirmations and documentation.
-def readable(record):
-    return receipt_fields(record)
-
-
 def catalog_markdown():
     return '\n\n'.join(f"{c['title']} — {price_text(c['price_rub'])}. Начало: {start_date_text(c['start_date'])}. Примерная нагрузка: {c['weekly_load']}." for c in COURSES.values())
 
@@ -149,7 +133,6 @@ def build_app():
                     confirm_btn=gr.Button('Подтвердить запись',variant='primary')
                     change_btn=gr.Button('Изменить данные')
                     cancel_btn=gr.Button('Отменить запись')
-                receipt=gr.File(label='Ваше подтверждение',visible=False,interactive=False,elem_id='confirmation-download')
                 with gr.Row(elem_id='composer'):
                     message=gr.Textbox(label='Ваше сообщение',show_label=False,placeholder='Напишите вопрос или «Хочу записаться»…',lines=1,max_lines=4,interactive=False,scale=8,elem_id='message-input')
                     submit=gr.Button('Отправить ↑',variant='primary',interactive=False,scale=1,elem_id='send-button')
@@ -160,7 +143,7 @@ def build_app():
                 gr.HTML('<div class="chat-bottom"><span>Отвечаем на вопросы и записываем прямо в чате</span><span>✧ IT Навигатор</span></div>')
                 clear=gr.Button('Новый диалог',elem_id='reset-button')
             with gr.Column(scale=3,min_width=285,elem_id='sidebar'):
-                gr.HTML('<section class="side-intro"><span class="side-tag">БЕЗ ЛИШНИХ ШАГОВ</span><h2>От «что выбрать?»<br>до «я записан».</h2><p>Всё в одном диалоге. Выбираем курс и старт, знакомимся — и проверяем данные перед записью.</p><div class="side-steps"><span>1</span> Курс <span>2</span> Дата <span>3</span> Имя <span>4</span> Готово</div></section>')
+                gr.HTML('<section class="side-intro"><span class="side-tag">БЕЗ ЛИШНИХ ШАГОВ</span><h2>От «что выбрать?»<br>до «я записан».</h2><p>Всё в одном диалоге. Выбираем курс и старт, знакомимся, оставляем контакт и проверяем заявку.</p><div class="side-steps"><span>1</span> Курс <span>2</span> Дата <span>3</span> Имя <span>4</span> Контакт <span>5</span> Готово</div></section>')
                 with gr.Column(elem_id='catalog-panel'):
                     gr.HTML('<div class="catalog-heading">Найдите свою программу <span>17 КУРСОВ</span></div>')
                     direction=gr.Dropdown(['Все направления']+list(dict.fromkeys(c['direction'] for c in COURSES.values())),value='Все направления',label='Направление',interactive=True)
@@ -169,20 +152,20 @@ def build_app():
                     cards=gr.HTML(catalog_cards())
         gr.HTML('<footer class="page-footer"><span>© 2026 IT Навигатор · Вместе к новым возможностям</span><span>'+html.escape(CATALOG['notice'])+'</span></footer>')
         queue=dict(concurrency_id='advisor',concurrency_limit=1,api_name=False)
-        demo.load(restore,[browser],[browser,sid,chat,receipt,confirm_row,progress,message,submit,pick,compare,book],api_name=False)
+        demo.load(restore,[browser],[browser,sid,chat,confirm_row,progress,message,submit,pick,compare,book],api_name=False)
         controls=[message,submit,pick,compare,book,confirm_btn,change_btn,cancel_btn,clear]
         def wire(component,text=None,enter=False):
             fn=capture if text is None else lambda history,text=text:capture(text,history)
             event=(component.submit if enter else component.click)(fn,[message,chat] if text is None else [chat],
                       [pending,chat]+controls,queue=False,api_name=False,js=BUSY_JS)
-            result=event.success(answer,[pending,sid],[chat,receipt,confirm_row,progress],**queue)
+            result=event.success(answer,[pending,sid],[chat,confirm_row,progress],**queue)
             result.then(enable_controls,[],controls,queue=False,api_name=False)
         wire(submit)
         wire(message,enter=True)
         for button,text in [(pick,'Помогите подобрать курс'),(compare,'Хочу сравнить программы'),(book,'Хочу записаться'),
                             (confirm_btn,'Подтверждаю запись'),(change_btn,'Изменить данные'),(cancel_btn,'Отмена')]:
             wire(button,text)
-        clear.click(reset,[],[browser,sid,chat,receipt,confirm_row,progress,message],**queue)
+        clear.click(reset,[],[browser,sid,chat,confirm_row,progress,message],**queue)
         for field in (direction,level,availability):
             field.input(catalog_cards,[direction,level,availability],[cards],api_name=False)
     return demo.queue(max_size=32)

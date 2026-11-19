@@ -28,14 +28,14 @@ def test_actual_user_flow_and_payment_after_confirmation(tmp_path):
     assert 'Юнит-экономика' not in answer(state) and 'ручному' in answer(state)
     assert 'Selenium/Playwright' in answer(state)  # Honest scope, not an automation promise.
     state=s.turn('one','запишите, а когда нужно оплатить?')
-    assert state['booking']['course_id']=='qa' and 'оплата не взимается' in answer(state)
-    s.turn('one','1');s.turn('one','Анна')
+    assert state['booking']['course_id']=='qa' and 'договориться об оплате' in answer(state)
+    s.turn('one','1');s.turn('one','Анна');s.turn('one','anna@example.com')
     state=s.turn('one','Подтверждаю запись')
     assert not state['booking']
     rid=state['last_receipt']['registration_id']
     state=s.turn('one','а когда нужно оплатить?')
     assert not state['booking'] and 'Выберите дату' not in answer(state)
-    assert 'оплата не взимается' in answer(state)
+    assert 'договориться об оплате' in answer(state)
     assert state['last_receipt']['registration_id']==rid
     state=s.turn('one','что входит в курс Аналитика данных?')
     assert not state['booking'] and state['course_ids']==['data']
@@ -64,7 +64,7 @@ def test_yes_requires_a_booking_offer(tmp_path):
 
 def test_switch_course_during_unfinished_booking_clears_old_draft(tmp_path):
     s=make(tmp_path)
-    s.turn('one','Хочу записаться на SQL');s.turn('one','1');s.turn('one','Анна')
+    s.turn('one','Хочу записаться на SQL');s.turn('one','1');s.turn('one','Анна');s.turn('one','anna@example.com')
     old=s.store.load('one')['booking']['token']
     state=s.turn('one','Что входит в курс Аналитика данных?')
     assert not state['booking'] and state['course_ids']==['data']
@@ -74,7 +74,7 @@ def test_switch_course_during_unfinished_booking_clears_old_draft(tmp_path):
 
 def test_legacy_phantom_booking_is_repaired_without_deleting_enrollment(tmp_path):
     s=make(tmp_path)
-    s.turn('one','Хочу записаться на SQL');s.turn('one','1');s.turn('one','Анна');s.turn('one','Подтверждаю')
+    s.turn('one','Хочу записаться на SQL');s.turn('one','1');s.turn('one','Анна');s.turn('one','anna@example.com');s.turn('one','Подтверждаю')
     saved=s.store.load('one');rid=saved['last_receipt']['registration_id']
     saved['booking']={'stage':'date','course_id':'sql'}
     s.store.save('one',saved)
@@ -86,9 +86,11 @@ def test_payment_question_during_unconfirmed_booking_preserves_fields(tmp_path):
     s=make(tmp_path)
     s.turn('one','Хочу записаться на SQL');s.turn('one','1')
     state=s.turn('one','А когда оплатить?')
-    assert state['booking']['stage']=='name' and 'оплата не взимается' in answer(state)
+    assert state['booking']['stage']=='name' and 'договориться об оплате' in answer(state)
     assert 'Выберите дату' not in answer(state)
     state=s.turn('one','Анна')
+    assert state['booking']['stage']=='contact'
+    state=s.turn('one','anna@example.com')
     assert state['booking']['stage']=='confirm'
 
 

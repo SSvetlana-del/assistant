@@ -2,6 +2,7 @@
 import re
 from datetime import date
 from advisor.catalog import start_date_text, price_text, MONTHS
+from advisor.contact import parse_contact, contact_label
 from advisor.guidance import (explicit_enrollment, enrollment_consent, is_payment, is_program, mentioned_courses)
 
 CONFIRM = {'подтверждаю','подтверждаю запись','подтвердить запись','да','да подтверждаю','всё верно','все верно'}
@@ -14,18 +15,6 @@ def normalize(text):
 
 def dates(course):
     return course.get('start_dates', [course['start_date']])
-
-
-def receipt_fields(record):
-    return {'Имя':record['name'], 'Курс':record['course'],
-            'Начало обучения':start_date_text(record['start_date']) if record.get('start_date') else 'не указано в прежней записи',
-            'Длительность':record['duration'],
-            'Стоимость курса':price_text(record['price_rub']) if record.get('price_rub') is not None else 'не указана в прежней записи',
-            'Формат':record['format']}
-
-
-def receipt_text(record):
-    return '\n'.join([f"Запись № {record['registration_id']}"] + [f'{k}: {v}' for k,v in receipt_fields(record).items()] + ['IT Навигатор · Тестовый проект. Оплата не взимается.'])
 
 
 class ChatService:
@@ -104,24 +93,31 @@ class ChatService:
             return f"Курс «{c['title']}» — {price_text(c['price_rub'])}.\n\nВыберите дату начала обучения — напишите дату или номер:\n\n{options}"
         if stage=='name':
             return f"Выбрали старт {start_date_text(state['start_date'])}. Как вас зовут? Можно указать только имя."
+        if stage=='contact':
+            return 'Оставьте email или телефон для связи. Менеджер использует этот контакт, чтобы обсудить обучение и оплату. Например: anna@example.com или +7 999 123-45-67.'
         if stage=='edit':
-            return 'Что поменяем: курс, дату старта или имя?'
+            return 'Что поменяем: курс, дату старта, имя или контакт для связи?'
         return (f"**Проверим вашу запись**\n\n"
                 f"Курс: **{c['title']}**\n\n"
                 f"Начало: **{start_date_text(state['start_date'])}**\n\n"
                 f"Имя: **{state['name']}**\n\n"
+                f"{contact_label(state)} для связи: **{state['contact_value']}**\n\n"
                 f"Стоимость: **{price_text(c['price_rub'])}** · Длительность: {c['duration']}\n\n"
                 'Всё верно? Напишите **«Подтверждаю»** или нажмите кнопку под чатом. '
-                'До подтверждения запись не сохраняется. Если нужно, можно изменить данные или отменить запись.')
+                'После подтверждения передадим менеджеру заявку и указанный контакт. До подтверждения заявка не сохраняется. Если нужно, можно изменить данные или отменить запись.')
 
     def advance(self, sid, state):
+        state['version']=2
         if not state.get('course_id'):state['stage']='course'
         elif not state.get('start_date'):state['stage']='date'
         elif not state.get('name'):state['stage']='name'
+        elif not parse_contact(state.get('contact_value','')):state['stage']='contact'
         else:
             c=self.courses[state['course_id']]
             payload=dict(course_id=c['id'],course=c['title'],name=state['name'],start_date=state['start_date'],
-                         duration=c['duration'],price_rub=c['price_rub'],format=c['format'])
+                         duration=c['duration'],price_rub=c['price_rub'],format=c['format'],
+                         contact_type=state['contact_type'],contact_value=state['contact_value'],
+                         status='pending_manager',handoff_channel='manager_queue',notification_status='not_configured')
             state['token']=self.store.draft(sid,payload)
             state['stage']='confirm'
         return self.prompt(state)
@@ -149,11 +145,25 @@ class ChatService:
         if state:
             chosen=self.choose_date(text,self.courses[state['course_id']])
             if chosen:state['start_date']=chosen
-            match=re.search(r'(?:меня зовут|моё имя|мое имя)\s+([^,.!?\n]+)',text,re.I)
+            match=re.search(r'(?:меня зовут|моё имя|мое имя)\s+([^,;.!?\n]+)',text,re.I)
             if match:
                 name=self.name_from_text(match.group(1))
                 if name:state['name']=name
+            for part in re.split(r'[,;\n]',text):
+                contact=parse_contact(part)
+                if contact:state.update(contact);break
         return state
+
+    def restore(self, sid):
+        saved=self.store.load(sid)
+        state=dict(saved.get('booking') or {})
+        if state.get('stage')=='confirm' and not parse_contact(state.get('contact_value','')):
+            self.cancel_draft(sid);state.pop('token',None)
+            state['stage']='contact';state['version']=2
+            saved['booking']=state
+            saved['history']=saved.get('history',[])+[{'role':'assistant','content':self.prompt(state)}]
+            self.store.save(sid,saved)
+        return saved
 
     def turn(self, sid, text):
         saved=self.store.load(sid)
@@ -167,8 +177,12 @@ class ChatService:
         consent=enrollment_consent(text,history)
         # Repair obsolete unfinished re-bookings of an already confirmed course.
         receipt=saved.get('last_receipt') or {}
-        if state.get('course_id') and state.get('course_id')==receipt.get('course_id') and not state.get('token'):
+        if state.get('course_id') and state.get('course_id')==receipt.get('course_id') and not state.get('token') and state.get('version',1)<2:
             self.cancel_draft(sid);state={}
+        # A pre-update confirmation may contain no contact; invalidate its token.
+        if state.get('stage')=='confirm' and not parse_contact(state.get('contact_value','')):
+            self.cancel_draft(sid);state.pop('token',None)
+            state['stage']='contact';state['version']=2
         if state and explicit:
             new_ids=mentioned_courses(text,self.courses)
             if len(new_ids)==1 and new_ids[0]!=state.get('course_id'):
@@ -199,20 +213,28 @@ class ChatService:
                     saved['last_receipt']=record
                     saved['confirmation_echo_pending']=True
                     state={}
-                    answer=(f"{'Готово, вы записаны' if created else 'Вы уже записаны'} на курс **«{record['course']}»**! "
-                            f"Начало — {start_date_text(record['start_date']) if record.get('start_date') else 'по прежним условиям'}.\n\n"
-                            f"Имя: {record['name']} · Номер записи: **{record['registration_id']}**.\n\n"
-                            'Подтверждение можно скачать под чатом. Есть ещё вопросы по обучению?')
+                    if record.get('status')=='pending_manager' and record.get('contact_value'):
+                        answer=(f"Спасибо, **{record['name']}**! Ваша заявка на курс **«{record['course']}»** сохранена и передана менеджеру.\n\n"
+                                f"Начало обучения — {start_date_text(record['start_date'])}.\n"
+                                f"{contact_label(record)} для связи: **{record['contact_value']}**.\n\n"
+                                'Менеджер свяжется с вами **в течение рабочего дня**. С ним можно ещё раз обсудить условия, '
+                                'уточнить нюансы обучения и договориться об оплате курса.\n\n'
+                                f"Номер заявки: **{record['registration_id']}**. Пока ждёте, есть ещё вопросы об обучении?")
+                    else:
+                        answer=(f"Ваша прежняя запись на курс **«{record['course']}»** уже сохранена. "
+                                f"Номер: **{record['registration_id']}**. Повторную заявку не создаём. Есть вопросы об обучении?")
             elif value.startswith(('измен','помен','другой курс','другая дата')) or state['stage']=='edit':
                 self.cancel_draft(sid);state.pop('token',None)
                 if 'курс' in value:
                     state.pop('course_id',None);state.pop('start_date',None)
                 elif 'дат' in value or 'старт' in value:state.pop('start_date',None)
                 elif 'имя' in value:state.pop('name',None)
+                elif any(w in value for w in ('контакт','телефон','почт','email','e-mail')):
+                    state.pop('contact_type',None);state.pop('contact_value',None)
                 else:
                     state['stage']='edit'
                     answer=self.prompt(state)
-                if any(w in value for w in ('курс','дат','старт','имя')):answer=self.advance(sid,state)
+                if any(w in value for w in ('курс','дат','старт','имя','контакт','телефон','почт','email','e-mail')):answer=self.advance(sid,state)
             elif state['stage']=='course':
                 cid=self.resolve_course(text,saved)
                 if cid:state['course_id']=cid;answer=self.advance(sid,state)
@@ -225,6 +247,10 @@ class ChatService:
                 name=None if question_like else self.name_from_text(text)
                 if name:state['name']=name;answer=self.advance(sid,state)
                 else:answer='Укажите, пожалуйста, имя, например «Анна» или «Меня зовут Анна». '+self.prompt(state)
+            elif state['stage']=='contact':
+                contact=parse_contact(text)
+                if contact:state.update(contact);answer=self.advance(sid,state)
+                else:answer='Не получилось распознать контакт. Укажите один email или телефон с кодом страны. '+self.prompt(state)
             else:
                 answer='Для сохранения нужно явное подтверждение. '+self.prompt(state)
         elif value in (CONFIRM-{'да','всё верно','все верно'}) and saved.get('confirmation_echo_pending') and saved.get('last_receipt'):
@@ -245,7 +271,7 @@ class ChatService:
                     answer=self.advance(sid,state)
                 else:answer=reply['history'][-1]['content']
         if explicit and is_payment(text):
-            policy=getattr(self.advisor,'catalog',{}).get('payment_policy','В этом учебном проекте оплата не взимается; оплачивать запись не нужно.')
+            policy=getattr(self.advisor,'catalog',{}).get('payment_policy','Оплату и условия курса можно обсудить с менеджером после подтверждения заявки. На сайте оплату не принимаем.')
             answer=policy+'\n\n'+answer
         saved['booking']=state
         if state.get('course_id'):saved['course_ids']=[state['course_id']]

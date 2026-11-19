@@ -208,20 +208,11 @@ def test_generated_support_reply_has_follow_up_question():
     assert reply.startswith('Обучение проходит онлайн.') and reply.endswith('?')
 
 
-def test_receipt_includes_dates_and_load_without_source():
-    from app import readable, catalog_markdown
-    fields=readable(payload())
-    assert fields['Начало обучения']=='07 декабря 2026 года'
-    assert 'Желаемая нагрузка' not in fields and 'Примерная нагрузка' not in fields
-    assert 'Источник' not in fields
+def test_catalog_display_and_no_download_component():
+    from app import build_app, catalog_markdown
     cards=catalog_markdown()
     assert 'http' not in cards and '4000 ₽' in cards
     assert '01 декабря 2026 года' in cards
     assert 'Тестовый проект. Запись сохраняется только в этом приложении.'==CATALOG['notice']
-
-
-def test_old_receipt_remains_readable():
-    from app import readable
-    old=payload()
-    old.pop('start_date');old.pop('weekly_load')
-    assert 'прежней записи' in readable(old)['Начало обучения']
+    config=build_app().get_config_file()
+    assert all(c['type']!='file' for c in config['components'])

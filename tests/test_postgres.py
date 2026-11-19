@@ -76,7 +76,8 @@ def test_conversational_booking_is_persistent_and_confirmed(pg):
     service=ChatService(AdvisorStub(),pg)
     service.turn(sid,'Хочу записаться на SQL')
     service.turn(sid,'1')
-    preview=service.turn(sid,'Анна')
+    service.turn(sid,'Анна')
+    preview=service.turn(sid,'anna@example.com')
     assert preview['booking']['stage']=='confirm'
     with pg.connect() as db:
         assert db.execute('SELECT count(*) AS n FROM enrollments WHERE session_id=%s',(sid,)).fetchone()['n']==0
@@ -85,8 +86,25 @@ def test_conversational_booking_is_persistent_and_confirmed(pg):
     assert result['last_receipt']['name']=='Анна'
     assert result['last_receipt']['start_date']=='2026-12-01'
     assert 'preferred_load' not in result['last_receipt']
+    assert result['last_receipt']['contact_value']=='anna@example.com'
+    assert result['last_receipt']['status']=='pending_manager'
     other=secrets.token_hex(16)
     service.turn(other,'Хочу записаться на SQL');service.turn(other,'1');service.turn(other,'Анна')
     service.turn(other,'Отмена')
     with pg.connect() as db:
         assert db.execute('SELECT count(*) AS n FROM drafts WHERE session_id=%s',(other,)).fetchone()['n']==0
+
+
+def test_legacy_contact_upgrade_is_atomic_and_keeps_registration_id(pg):
+    sid=secrets.token_hex(16)
+    old,_=pg.confirm(sid,pg.draft(sid,payload()))
+    data=dict(payload(),contact_type='email',contact_value='test@example.com',
+              status='pending_manager',handoff_channel='manager_queue',notification_status='not_configured')
+    upgraded,created=pg.confirm(sid,pg.draft(sid,data))
+    assert not created and upgraded['registration_id']==old['registration_id']
+    assert upgraded['contact_value']=='test@example.com'
+    with pg.connect() as db:
+        row=db.execute('SELECT count(*) AS n FROM enrollments WHERE session_id=%s',(sid,)).fetchone()
+        assert row['n']==1
+        saved=db.execute('SELECT payload FROM enrollments WHERE session_id=%s',(sid,)).fetchone()
+        assert 'pending_manager' in saved['payload'] and 'test@example.com' in saved['payload']

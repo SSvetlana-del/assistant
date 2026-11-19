@@ -78,7 +78,14 @@ class Store:
                                   (sid, payload['course_id'])).fetchone()
             if existing:
                 self.query(db, 'DELETE FROM drafts WHERE token=?', (token,))
-                return json.loads(existing['payload']), False
+                old=json.loads(existing['payload'])
+                if payload.get('contact_value') and not old.get('contact_value'):
+                    record=dict(payload,registration_id=old['registration_id'],created_at=old['created_at'],
+                                updated_at=datetime.now(timezone.utc).isoformat())
+                    self.query(db,'UPDATE enrollments SET payload=? WHERE id=?',
+                               (json.dumps(record,ensure_ascii=False),existing['id']))
+                    return record, False
+                return old, False
             record = dict(payload, registration_id=secrets.token_hex(8), created_at=datetime.now(timezone.utc).isoformat())
             self.query(db, 'INSERT INTO enrollments VALUES (?,?,?,?,?)',
                        (record['registration_id'], sid, payload['course_id'], json.dumps(record, ensure_ascii=False), record['created_at']))
